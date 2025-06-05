@@ -9,10 +9,11 @@ import os # Import os for environment variables
 import aiohttp
 from typing import Optional
 from bs4 import BeautifulSoup
+from dotenv import load_dotenv
 
 # Load configuration
 try:
-    with open('config.json') as f:
+    with open('config.json', r) as f:
         config = json.load(f)
 except FileNotFoundError:
     print("config.json not found. Please create one with 'mod_roles', 'guild_id', and 'log_channel_id'.")

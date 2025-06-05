@@ -1,5 +1,6 @@
 .env
-config.json
-notes
-tasks.json
-warnings.json
+.config.json
+.tasks.json
+.warnings.json
+.venv
+.vscode
