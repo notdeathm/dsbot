@@ -42,6 +42,21 @@ intents.guilds = True
 
 bot = commands.Bot(command_prefix="/", intents=intents)
 
+# List of custom presence messages and types
+presence_list = [
+    discord.Game(name="The Souls by Devo Studio"),
+    discord.Activity(type=discord.ActivityType.watching, name="Watching over the server"),
+    discord.Activity(type=discord.ActivityType.listening, name="Souls whispering in the void"),
+    discord.Activity(type=discord.ActivityType.playing, name="Screams in the vents"),
+    discord.Activity(type=discord.ActivityType.listening, name="The echo in the dark"),
+    discord.Activity(type=discord.ActivityType.playing, name="Playing with others"),
+    discord.Activity(type=discord.ActivityType.playing, name="The breaker is broken"),
+    discord.Activity(type=discord.ActivityType.watching, name="Devo Studio grow stronger"),
+    discord.Game(name="The Souls | In development"),
+    discord.Activity(type=discord.ActivityType.listening, name="With other Devs talking about the game")
+]
+
+
 # --- Helper Functions & Decorators ---
 def _has_any_role_id(member: Member, role_ids: list[int]) -> bool:
     return any(role.id in role_ids for role in member.roles)
@@ -139,9 +154,19 @@ async def on_ready():
     except Exception as e:
         print(f"Error syncing commands: {e}")
 
+    if not rotate_presence.is_running():
+        rotate_presence.start()
     example_task.start()
     meeting_reminder_task.start()
     release_countdown_updater.start()
+
+
+# Background task to rotate presence
+@tasks.loop(minutes=10)
+async def rotate_presence():
+    new_presence = random.choice(presence_list)
+    await bot.change_presence(status=discord.Status.online, activity=new_presence)
+    print(f"🔁 Presence changed!")
 
 @bot.event
 async def on_member_join(member: Member):
