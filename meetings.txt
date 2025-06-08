@@ -1,0 +1,1 @@
+{"meeting_id": "1", "topic": "Testing", "time_utc": "2025-06-05T20:10:00+00:00", "channel_id": 1209259829215109141, "scheduled_by_id": 658331657803399170, "scheduled_by_name": "notdeath.m", "reminded": true}
