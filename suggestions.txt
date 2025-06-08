@@ -1,1 +1,0 @@
-{"suggester_id": 658331657803399170, "suggester_name": "notdeath.m", "suggestion": "Testing", "timestamp": "2025-06-05T22:38:09.346467+00:00", "guild_id": 1192254741359628378, "channel_id": 1209259829215109141}
