@@ -49,11 +49,11 @@ presence_list = [
     discord.Activity(type=discord.ActivityType.listening, name="Souls whispering in the void"),
     discord.Activity(type=discord.ActivityType.playing, name="Screams in the vents"),
     discord.Activity(type=discord.ActivityType.listening, name="The echo in the dark"),
-    discord.Activity(type=discord.ActivityType.playing, name="Playing with others"),
+    discord.Activity(type=discord.ActivityType.competing, name="Playing with others"),
     discord.Activity(type=discord.ActivityType.playing, name="The breaker is broken"),
     discord.Activity(type=discord.ActivityType.watching, name="Devo Studio grow stronger"),
     discord.Game(name="The Souls | In development"),
-    discord.Activity(type=discord.ActivityType.listening, name="With other Devs talking about the game")
+    discord.Activity(type=discord.ActivityType.playing, name="With other Devs talking")
 ]
 
 
@@ -138,11 +138,76 @@ def read_from_file(filename: str) -> list[dict[str, Any]]:
         print(f"Error reading from file {filename}: {e}")
         return []
 
-# --- Event Listeners ---
+# --- Logging Helper ---
+def log_event(guild: discord.Guild, title: str, description: str, color=Color.blue(), extra_fields=None):
+    embed = Embed(title=title, description=description, color=color, timestamp=datetime.datetime.now(datetime.timezone.utc))
+    if extra_fields:
+        for name, value in extra_fields.items():
+            embed.add_field(name=name, value=value, inline=False)
+    # Send to log channel
+    asyncio.create_task(log_action_to_channel(guild, embed))
+    # Save to logs.txt
+    log_data = {
+        "guild_id": getattr(guild, 'id', None),
+        "title": title,
+        "description": description,
+        "fields": extra_fields,
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
+    }
+    log_to_file("logs.txt", log_data)
+
+# --- Event Listeners for Logging ---
+@bot.event
+async def on_message_delete(message: discord.Message):
+    if message.author.bot or not message.guild:
+        return
+    desc = f"**Author:** {message.author} ({message.author.id})\n**Channel:** {getattr(message.channel, 'mention', str(message.channel))}\n**Content:**\n{message.content if message.content else '[No text content / Embed]'}"
+    extra = None
+    if message.attachments:
+        extra = {"Attachments": '\n'.join([f"[{a.filename}]({a.url})" for a in message.attachments])}
+    log_event(message.guild, "Message Deleted", desc, Color.orange(), extra)
+
+@bot.event
+async def on_message_edit(before: discord.Message, after: discord.Message):
+    if before.author.bot or not before.guild:
+        return
+    desc = f"**Author:** {before.author} ({before.author.id})\n**Channel:** {getattr(before.channel, 'mention', str(before.channel))}\n**Before:**\n{before.content}\n**After:**\n{after.content}"
+    log_event(before.guild, "Message Edited", desc, Color.gold())
+
+@bot.event
+async def on_bulk_message_delete(messages):
+    if not messages:
+        return
+    guild = messages[0].guild
+    channel = getattr(messages[0].channel, 'mention', str(messages[0].channel))
+    desc = f"Bulk deleted {len(messages)} messages in {channel}."
+    log_event(guild, "Bulk Message Delete", desc, Color.red())
+
+@bot.event
+async def on_member_update(before: Member, after: Member):
+    if before.roles == after.roles:
+        return
+    guild = after.guild
+    removed_roles = [role for role in before.roles if role not in after.roles]
+    added_roles = [role for role in after.roles if role not in before.roles]
+    if removed_roles:
+        roles_str = ", ".join([role.name for role in removed_roles])
+        log_event(guild, "Role(s) Removed", f"**User:** {after.mention} ({after.id})\n**Roles Removed:** {roles_str}", Color.blue())
+    if added_roles:
+        roles_str = ", ".join([role.name for role in added_roles])
+        log_event(guild, "Role(s) Added", f"**User:** {after.mention} ({after.id})\n**Roles Added:** {roles_str}", Color.green())
+
+@bot.event
+async def on_voice_state_update(member: Member, before, after):
+    if before.channel != after.channel:
+        desc = f"{member.mention} switched from {getattr(before.channel, 'mention', 'None')} to {getattr(after.channel, 'mention', 'None')}"
+        log_event(member.guild, "Voice Channel Switch", desc, Color.purple())
+
 @bot.event
 async def on_ready():
+    for guild in bot.guilds:
+        log_event(guild, "Bot Started", f"Bot is online as {bot.user}", Color.green())
     print(f'Logged in as {bot.user.name} (ID: {bot.user.id})')
-    print('------')
     try:
         if GUILD_ID:
             print(f"Syncing commands to guild ID: {GUILD_ID}...")
@@ -153,13 +218,9 @@ async def on_ready():
         print("Commands synced!")
     except Exception as e:
         print(f"Error syncing commands: {e}")
-
     if not rotate_presence.is_running():
         rotate_presence.start()
-    example_task.start()
-    meeting_reminder_task.start()
-    release_countdown_updater.start()
-
+    # Start your other background tasks here
 
 # Background task to rotate presence
 @tasks.loop(minutes=10)
@@ -395,6 +456,9 @@ async def poll(
     for i in range(len(options)):
         await poll_message.add_reaction(regional_indicator_emojis[i])
 
+    # Log the poll creation
+    log_event(interaction.guild, "Poll Created", f"Poll by {interaction.user.mention}: {question}", Color.blue())
+
 @utility_commands_group.command(name="reportbug", description="Report a bug for 'The Souls' or other projects.")
 @app_commands.describe(description="Detailed description of the bug.")
 async def reportbug(interaction: Interaction, description: str):
@@ -429,6 +493,9 @@ async def reportbug(interaction: Interaction, description: str):
             await interaction.followup.send(f"Bug report logged, but an error occurred sending to channel: {e}", ephemeral=True)
     else:
         await interaction.followup.send(f"Bug report logged, but the bug report channel (ID: {BUG_REPORT_CHANNEL_ID}) was not found. Please check config.", ephemeral=True)
+
+    # Log the bug report
+    log_event(interaction.guild, "Bug Report", f"Bug by {interaction.user.mention}: {description}", Color.red())
 
 @utility_commands_group.command(name="suggest", description="Submit a suggestion.")
 @app_commands.describe(suggestion_text="Your suggestion.") # Renamed from 'idea' for clarity
@@ -465,6 +532,9 @@ async def suggest(interaction: Interaction, suggestion_text: str):
              await interaction.followup.send(f"Suggestion logged, but an error occurred sending to channel: {e}", ephemeral=True)
     else:
         await interaction.followup.send(f"Suggestion logged, but the feedback channel (ID: {BUG_REPORT_CHANNEL_ID}) was not found. Please check config.", ephemeral=True)
+
+    # Log the suggestion
+    log_event(interaction.guild, "Suggestion", f"Suggestion by {interaction.user.mention}: {suggestion_text}", Color.gold())
 
 
 # --- Moderation Commands ---
@@ -569,7 +639,8 @@ async def mute(interaction: Interaction, member: Member, reason: str):
     success = await _apply_mute_role(interaction, member, reason)
     if success is True: # Check specifically for True, not just truthy if _apply_mute_role returns False for "already muted"
         await interaction.response.send_message(f"{member.mention} has been muted. Reason: {reason}", ephemeral=True)
-    # If _apply_mute_role sent its own response (e.g. "already muted"), we don't send another one here.
+        # Log the mute action
+        log_event(interaction.guild, "User Muted", f"{member.mention} muted by {interaction.user.mention}. Reason: {reason}", Color.light_grey())
 
 @mod_commands_group.command(name="tempmute", description="Temporarily mute a user.")
 @is_moderator()
@@ -817,131 +888,98 @@ async def giveaway(interaction: Interaction, duration: str, winners: int, prize:
     end_emb = Embed(title="🎉 Giveaway Ended 🎉", description=f"**Prize:** {prize}\n**Winners:** {mentions if actual_winners else 'None'}", color=Color.dark_grey())
     await upd_msg.edit(embed=end_emb)
 
+    # Log the giveaway start
+    log_event(interaction.guild, "Giveaway Started", f"Giveaway by {interaction.user.mention}: {prize}", Color.magenta())
+
 # --- Moderation Commands (Warn, Kick, Ban, Clear - from previous) ---
 @mod_commands_group.command(name="warn", description="Warn a user.")
 @is_moderator()
 @app_commands.describe(member="Member to warn.", reason="Reason.")
-async def warn(interaction: Interaction, member: Member, reason: str): # Original warn
-    if member.bot or member == interaction.user: await interaction.response.send_message("Invalid target.", ephemeral=True); return
+async def warn(interaction: Interaction, member: Member, reason: str):
+    if member.bot or member == interaction.user:
+        await interaction.response.send_message("Invalid target.", ephemeral=True)
+        return
     ts = datetime.datetime.now(datetime.timezone.utc)
-    data = {"mod_id":interaction.user.id,"mod_name":interaction.user.name,"user_id":member.id,"user_name":member.name,"reason":reason,"timestamp":ts.isoformat(), "guild_id": interaction.guild_id}
+    data = {"moderator_name": interaction.user.name, "user_id": member.id, "user_name": member.name, "reason": reason, "timestamp": ts.isoformat(), "guild_id": interaction.guild_id}
     log_to_file(WARNINGS_FILE, data)
-    log_emb = Embed(title="User Warned", description=f"**User:** {member.mention}\n**Mod:** {interaction.user.mention}\n**Reason:** {reason}", color=Color.yellow(), timestamp=ts)
-    await log_action_to_channel(interaction.guild, log_emb)
-    try: await member.send(f"Warned in **{interaction.guild.name}**: {reason}"); dms="DM sent."
-    except: dms="Could not DM."
+    log_event(interaction.guild, "User Warned", f"{member.mention} warned by {interaction.user.mention}. Reason: {reason}", Color.yellow())
+    try:
+        await member.send(f"You have been warned in **{interaction.guild.name}**. Reason: {reason}")
+        dms = "DM sent."
+    except Exception:
+        dms = "Could not DM."
     await interaction.response.send_message(f"{member.mention} warned. {dms}", ephemeral=True)
 
 @mod_commands_group.command(name="kick", description="Kick a user.")
 @is_moderator()
 @app_commands.describe(member="Member to kick.", reason="Reason.")
-async def kick(interaction: Interaction, member: Member, reason: str="Not provided."): # Original kick
-    if member.bot or member == interaction.user : await interaction.response.send_message("Invalid target.", ephemeral=True); return
-    # Hierarchy check
+async def kick(interaction: Interaction, member: Member, reason: str = "Not provided."):
+    if member.bot or member == interaction.user:
+        await interaction.response.send_message("Invalid target.", ephemeral=True)
+        return
     if not (interaction.user.id == interaction.guild.owner_id) and member.top_role >= interaction.user.top_role:
-        await interaction.response.send_message("Cannot kick user with higher/equal role.", ephemeral=True); return
+        await interaction.response.send_message("Cannot kick user with higher/equal role.", ephemeral=True)
+        return
     ts = datetime.datetime.now(datetime.timezone.utc)
-    log_emb = Embed(title="User Kicked", description=f"**User:** {member.mention}\n**Mod:** {interaction.user.mention}\n**Reason:** {reason}", color=Color.red(), timestamp=ts)
-    try: await member.send(f"Kicked from **{interaction.guild.name}**. Reason: {reason}")
-    except: pass
-    try: await member.kick(reason=reason); await log_action_to_channel(interaction.guild, log_emb); await interaction.response.send_message(f"{member.mention} kicked.", ephemeral=True)
-    except discord.Forbidden: await interaction.response.send_message("I lack permission.", ephemeral=True)
-    except Exception as e: await interaction.response.send_message(f"Error: {e}", ephemeral=True)
+    try:
+        await member.send(f"You have been kicked from **{interaction.guild.name}**. Reason: {reason}")
+    except Exception:
+        pass
+    try:
+        await member.kick(reason=reason)
+        log_event(interaction.guild, "User Kicked", f"{member.mention} kicked by {interaction.user.mention}. Reason: {reason}", Color.red())
+        await interaction.response.send_message(f"{member.mention} kicked.", ephemeral=True)
+    except discord.Forbidden:
+        await interaction.response.send_message("I lack permission.", ephemeral=True)
+    except Exception as e:
+        await interaction.response.send_message(f"Error: {e}", ephemeral=True)
 
 @mod_commands_group.command(name="ban", description="Ban a user.")
 @is_moderator()
 @app_commands.describe(user="User to ban (ID or mention).", reason="Reason.")
-async def ban(interaction: Interaction, user: User, reason: str="Not provided."): # Original ban
-    # Basic check, can be improved if user is a Member object for bot/self check
-    if user.id == interaction.user.id : await interaction.response.send_message("Cannot ban self.", ephemeral=True); return
-    # Hierarchy check (only if 'user' is a Member, which might not be the case for User input)
-    # This might need adjustment if banning by ID for users not in server
+async def ban(interaction: Interaction, user: User, reason: str = "Not provided."):
+    if user.id == interaction.user.id:
+        await interaction.response.send_message("Cannot ban self.", ephemeral=True)
+        return
     member_obj = interaction.guild.get_member(user.id)
     if member_obj and not (interaction.user.id == interaction.guild.owner_id) and member_obj.top_role >= interaction.user.top_role:
-         await interaction.response.send_message("Cannot ban user with higher/equal role (if in server).", ephemeral=True); return
-    if member_obj and member_obj.bot : await interaction.response.send_message("Cannot ban bots.", ephemeral=True); return
-
+        await interaction.response.send_message("Cannot ban user with higher/equal role (if in server).", ephemeral=True)
+        return
+    if member_obj and member_obj.bot:
+        await interaction.response.send_message("Cannot ban bots.", ephemeral=True)
+        return
     ts = datetime.datetime.now(datetime.timezone.utc)
-    log_emb = Embed(title="User Banned", description=f"**User:** {user.mention} ({user.id})\n**Mod:** {interaction.user.mention}\n**Reason:** {reason}", color=Color.dark_red(), timestamp=ts)
-    try: await interaction.guild.ban(Object(id=user.id), reason=reason); await log_action_to_channel(interaction.guild, log_emb); await interaction.response.send_message(f"{user.name} banned.", ephemeral=True)
-    except discord.Forbidden: await interaction.response.send_message("I lack permission.", ephemeral=True)
-    except Exception as e: await interaction.response.send_message(f"Error: {e}", ephemeral=True)
-
+    try:
+        await interaction.guild.ban(user, reason=reason)
+        log_event(interaction.guild, "User Banned", f"{user.mention} banned by {interaction.user.mention}. Reason: {reason}", Color.dark_red())
+        await interaction.response.send_message(f"{user.name} banned.", ephemeral=True)
+    except discord.Forbidden:
+        await interaction.response.send_message("I lack permission.", ephemeral=True)
+    except Exception as e:
+        await interaction.response.send_message(f"Error: {e}", ephemeral=True)
 
 @mod_commands_group.command(name="clear", description="Clear messages.")
 @is_moderator()
 @app_commands.describe(amount="Number of messages (1-100).")
-async def clear(interaction: Interaction, amount: app_commands.Range[int,1,100]): # Original clear
+async def clear(interaction: Interaction, amount: app_commands.Range[int, 1, 100]):
     await interaction.response.defer(ephemeral=True)
     deleted = await interaction.channel.purge(limit=amount)
-    log_emb = Embed(title="Messages Cleared", description=f"**Mod:** {interaction.user.mention}\n**Channel:** {interaction.channel.mention}\n**Amount:** {len(deleted)}", color=Color.teal(), timestamp=datetime.datetime.now(datetime.timezone.utc))
-    await log_action_to_channel(interaction.guild, log_emb)
+    log_event(interaction.guild, "Messages Cleared", f"**Mod:** {interaction.user.mention}\n**Channel:** {interaction.channel.mention}\n**Amount:** {len(deleted)}", Color.teal())
     await interaction.followup.send(f"Deleted {len(deleted)} messages.", ephemeral=True)
 
-# --- Admin Commands (Say - from previous) ---
 @admin_commands_group.command(name="say", description="Bot says something (Admin).")
 @is_admin()
 @app_commands.describe(message="Message to say.", channel="Channel (optional).")
-async def say(interaction: Interaction, message: str, channel: discord.TextChannel=None): # Original say
+async def say(interaction: Interaction, message: str, channel: Optional[discord.TextChannel] = None):
     target = channel or interaction.channel
-    try: await target.send(message); await interaction.response.send_message(f"Sent to {target.mention}.", ephemeral=True)
-    # Log this action
-    except discord.Forbidden: await interaction.response.send_message(f"No permission in {target.mention}.", ephemeral=True)
-    except Exception as e: await interaction.response.send_message(f"Error: {e}", ephemeral=True)
-
-# --- Utility Commands (AskDevAI, ShareCode, Release, Tasks, Meetings - from previous) ---
-@utility_commands_group.command(name="askdevai", description="Ask Dev AI.")
-@app_commands.describe(question="Your question.")
-async def askdevai(interaction: Interaction, question: str):
-    await interaction.response.defer()
-    await asyncio.sleep(1)  # Simulate
-    resp = "Dev AI says: I'm learning!"
-    emb = Embed(title="🤖 Dev Helper AI", color=Color.cyan())
-    emb.add_field(name="Q", value=question, inline=False)
-    emb.add_field(name="A", value=resp, inline=False)
-    await interaction.followup.send(embed=emb)
-
-class CodeSnippetModal(discord.ui.Modal, title='Share Code Snippet'): # Original Modal
-    language = discord.ui.TextInput(label='Language',placeholder='python, js (opt)',required=False)
-    code = discord.ui.TextInput(label='Code',style=TextStyle.paragraph,placeholder='Your code...')
-    async def on_submit(self, interaction: Interaction):
-        lang=self.language.value or ""; block=f"```{lang}\n{self.code.value}\n```"
-        await interaction.response.send_message(f"By {interaction.user.mention}:\n{block}")
-
-@utility_commands_group.command(name="sharecode", description="Share code snippet.")
-async def sharecode(interaction: Interaction): await interaction.response.send_modal(CodeSnippetModal()) # Original sharecode
-
-@utility_commands_group.command(name="release", description="Release countdown.")
-async def release_countdown(interaction: Interaction): # Original release
-    # Simplified from previous, as TARGET_RELEASE_TIME is not fully dynamic here
-    await interaction.response.send_message("Release: Coming Soon!", ephemeral=True)
-
-@utility_commands_group.command(name="addtask", description="Add task.")
-@app_commands.describe(description="Task description.")
-async def addtask(interaction: Interaction, description: str): # Simplified original addtask
-    # Actual implementation from previous version should be used
-    log_to_file(TASKS_FILE, {"desc": description, "user": interaction.user.name})
-    await interaction.response.send_message(f"Task '{description}' added.", ephemeral=True)
-
-@utility_commands_group.command(name="viewtasks", description="View tasks.")
-async def viewtasks(interaction: Interaction): # Simplified original viewtasks
-    tasks = read_from_file(TASKS_FILE)
-    if not tasks: await interaction.response.send_message("No tasks.", ephemeral=True); return
-    desc = "\n".join([f"- {t.get('desc','N/A')}" for t in tasks[:10]])
-    await interaction.response.send_message(f"**Tasks:**\n{desc}", ephemeral=True)
-
-@utility_commands_group.command(name="completetask", description="Complete task.")
-@app_commands.describe(task_id="ID of task.")
-async def completetask(interaction: Interaction, task_id: str): # Simplified original completetask
-    # Actual implementation from previous version should be used
-    await interaction.response.send_message(f"Task ID {task_id} marked (placeholder).",ephemeral=True)
-
-@utility_commands_group.command(name="schedulemeeting", description="Schedule meeting.")
-@app_commands.describe(topic="Meeting topic.", time_str="Time (YYYY-MM-DD HH:MM).")
-async def schedulemeeting(interaction: Interaction, topic: str, time_str: str): # Simplified original schedulemeeting
-    # Actual implementation from previous version should be used
-    log_to_file(MEETINGS_FILE, {"topic": topic, "time": time_str, "user": interaction.user.name})
-    await interaction.response.send_message(f"Meeting '{topic}' scheduled for {time_str}.", ephemeral=True)
+    try:
+        await target.send(message)
+        await interaction.response.send_message("Message sent!", ephemeral=True)
+        log_event(interaction.guild, "Admin Say", f"{interaction.user.mention} used /say in {target.mention}: {message}", Color.blurple())
+    except discord.Forbidden:
+        await interaction.response.send_message("I don't have permission to send messages in that channel.", ephemeral=True)
+    except Exception as e:
+        await interaction.response.send_message(f"Error: {e}", ephemeral=True)
 
 # --- Event Scheduler ---
 @utility_commands_group.command(name="scheduleevent", description="Schedule and announce an event with RSVP reactions.")
@@ -1156,7 +1194,7 @@ async def remindme(interaction: Interaction, time: str, message: str):
 async def aichat(interaction: Interaction, message: str):
     await interaction.response.defer(ephemeral=True)
     # Placeholder: Replace with real AI integration if desired
-    response = f"AI says: Sorry, I am just a stub right now! You said: {message}"
+    response = f"AI says: I'm learning! You said: {message}"
     await interaction.followup.send(response, ephemeral=True)
 
 # --- Bot Shutdown Command (Owner Only) ---
@@ -1172,3 +1210,7 @@ async def DSShutdown(interaction: Interaction):
         return
     await interaction.response.send_message("Shutting down...", ephemeral=True)
     await bot.close()
+
+# --- Anti-Spam/Anti-Raid Logging (example) ---
+# When a user is muted/timed out for spam:
+# log_event(interaction.guild, "Anti-Spam", f"{member.mention} auto-muted for spam.", Color.red())
