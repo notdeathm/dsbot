@@ -1,0 +1,2 @@
+{"guild_id": 1192254741359628378, "title": "Bot Started", "description": "Bot is online as Devo Studio#1927", "fields": null, "timestamp": "2025-06-09T00:13:04.190790+00:00"}
+{"guild_id": 1192254741359628378, "title": "User Warned", "description": "<@1265056737753436220> warned by <@658331657803399170>. Reason: Test", "fields": null, "timestamp": "2025-06-09T00:13:54.861919+00:00"}
